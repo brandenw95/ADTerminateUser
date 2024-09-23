@@ -6,7 +6,7 @@
 
 # Global Constants
 $TERMINATED_OU = "OU=Terminated Users,OU=VII Locations,DC=vii,DC=local"
-$AD_CSV_REPORT_PATH = "C:\Windows\SYSVOL\sysvol\vii.local\Scripts\UserTerminations\Allwest"
+$AD_CSV_REPORT_PATH = "C:\temp\TerminationAttributes"
 
 function SanitizeGetSamName {
     # This function sanitizes a given username. 
