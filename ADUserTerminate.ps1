@@ -4,7 +4,11 @@
 # Description: User Termination Script
 # =========================
 
-function SanitizeUser {
+# Global Constants
+$TERMINATED_OU = "OU=Terminated Users,OU=VII Locations,DC=vii,DC=local"
+$AD_CSV_REPORT_PATH = "C:\Windows\SYSVOL\sysvol\vii.local\Scripts\UserTerminations\Allwest"
+
+function SanitizeGetSamName {
     # This function sanitizes a given username. 
     # It extracts the SamAccountName from a UPN if needed and checks for a valid format.
     
@@ -25,16 +29,15 @@ function SanitizeUser {
     }
 }
 
-function GetAndValidateUser {
+function FindUserAD {
     # This function prompts the user for a valid SamAccountName.
     # It checks if the user exists in Active Directory before returning the user object.
 
-    param(
-        [String]$UserId
-    )
+    $UserFound = $False
 
     while (-not $UserFound) {
-        #$UserId = Read-Host -Prompt 'Input the username of the user to be terminated'
+        $UserId = Read-Host -Prompt 'Input the username of the user to be terminated'
+        $UserId = SanitizeGetSamName -User $UserId
         $ADUser = Get-ADUser -Filter {SamAccountName -eq $UserId} -ErrorAction SilentlyContinue
 
         if ($ADUser) {
@@ -90,15 +93,10 @@ function ExportGroupMemberships {
 
     return $ADGroups
 }
-
-function ExportClearedAttributes {
-    # This function exports cleared user attributes for documentation purposes.
-    # It retrieves attributes like manager, office location, and title, and saves them to a CSV.
-
+function FindManager{
+    # Function to find the manager of a user object.
     param(
-        [Object]$User,
-        [String]$UserName,
-        [String]$ADGroupReportPath
+        [Object]$User
     )
 
     $ManagerUPN = "N/A"
@@ -126,6 +124,21 @@ function ExportClearedAttributes {
         }
     }
 
+    return $ManagerUPN
+
+}
+function ExportClearedAttributes {
+    # This function exports cleared user attributes for documentation purposes.
+    # It retrieves attributes like manager, office location, and title, and saves them to a CSV.
+
+    param(
+        [Object]$User,
+        [String]$UserName,
+        [String]$ADGroupReportPath
+    )
+
+    $ManagerUPN = FindManager -User $User
+
     $ClearedAttributesList = @(
         [PSCustomObject]@{Attribute="UserName"; Value=$ADUser.Name},
         [PSCustomObject]@{Attribute="ManagerUPN"; Value=$ManagerUPN},
@@ -144,7 +157,7 @@ function ExportClearedAttributes {
         Write-Output "$($attribute.Attribute): $($attribute.Value)"
     }
     Write-Output "#################"
-    $ClearedAttributesCsv = Join-Path -Path $ADGroupReportPath -ChildPath ("{0}-ClearedAttributes.csv" -f $UserName)
+    $ClearedAttributesCsv = Join-Path -Path $ADGroupReportPath -ChildPath ("$UserName-ClearedAttributes.csv")
     $ClearedAttributesList | Export-Csv -Path $ClearedAttributesCsv -NoTypeInformation
 }
 
@@ -195,22 +208,18 @@ function Main{
     # It validates the user, exports group memberships and cleared attributes, and handles termination.
 
     DisplayScriptInfo
-    $TerminatedOU = "OU=Terminated Users,OU=VII Locations,DC=vii,DC=local"
-    $ADGroupReportPath = "C:\Windows\SYSVOL\sysvol\vii.local\Scripts\UserTerminations\Allwest"
-
-    $UserId = Read-Host -Prompt 'Input the username of the user to be terminated'
-    $ADUser = GetAndValidateUser -UserId $UserId
+    $ADUser = FindUserAD
 
     if (ConfirmTermination -UserName $ADUser.Name) {
-        if (-Not (Test-Path $ADGroupReportPath -PathType Container)) {
-            New-Item -Path $ADGroupReportPath -ItemType Directory -Verbose
+        if (-Not (Test-Path $AD_CSV_REPORT_PATH -PathType Container)) {
+            New-Item -Path $AD_CSV_REPORT_PATH -ItemType Directory
         }
 
-        $ADGroups = ExportGroupMemberships -UserId $UserId -UserName $ADUser.Name -ADGroupReportPath $ADGroupReportPath
-        ExportClearedAttributes -User $ADUser -UserName $ADUser.Name -ADGroupReportPath $ADGroupReportPath
-        TerminateUser -UserId $UserId -ADGroups $ADGroups -TerminatedOU $TerminatedOU
+        $ADGroups = ExportGroupMemberships -UserId $UserId -UserName $ADUser.Name -ADGroupReportPath $AD_CSV_REPORT_PATH
+        ExportClearedAttributes -User $ADUser -UserName $ADUser.Name -ADGroupReportPath $AD_CSV_REPORT_PATH
+        TerminateUser -UserId $UserId -ADGroups $ADGroups -TerminatedOU $TERMINATED_OU
 
-        Read-Host -Prompt "Press Enter to exit"
+        Pause
     } else {
         Write-Output "Termination process aborted."
     }
